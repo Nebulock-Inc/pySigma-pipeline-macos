@@ -7,9 +7,6 @@ authors = ["Eric Brown - Nebulock, Inc."]
 license = "MIT"
 repository = "https://github.com/Nebulock-Inc/pySigma-pipeline-macos"
 homepage = "https://github.com/Nebulock-Inc/pySigma-pipeline-macos"
-
-[tool.poetry.urls]
-"Issues" = "https://github.com/Nebulock-Inc/pySigma-pipeline-macos/issues"
 keywords = ["sigma", "pysigma", "macos", "endpoint security", "unified log", "detection"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -20,6 +17,9 @@ classifiers = [
 packages = [
     { include = "sigma" }
 ]
+
+[tool.poetry.urls]
+"Issues" = "https://github.com/Nebulock-Inc/pySigma-pipeline-macos/issues"
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.15"
