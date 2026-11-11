@@ -90,6 +90,10 @@ sigma-cli:
 * **ESF only has a `macos_esf_ecs` pipeline.** There is no raw ESF pipeline; raw `eslogger` JSON is not mapped.
 * Only the backends exercised by the tests are known to work: Elasticsearch (Lucene, EQL, ES|QL), Splunk and CrowdStrike LogScale. <!-- TASK16: link the support matrix here -->
 
+## Tested versions
+
+CI runs pySigma 1.x on Python 3.10 to 3.14, because the backends used by the tests still pin pySigma below 2. pySigma 2.x was tested locally only (the full suite passes with the backend packages installed without their dependency pins); it is not covered by CI.
+
 ## Development
 
     python -m venv .venv && . .venv/bin/activate
