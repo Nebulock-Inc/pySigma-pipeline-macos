@@ -569,6 +569,50 @@ def test_extended_correlation_condition():
     (pipelines["macos_esf_ecs"]() + pipelines["macos_ul_ecs"]()).apply(collection.rules[-1])
 
 
+UL_SUDO = UL_TCC.replace("name: ul_tcc", "name: ul_sudo").replace("category: tcc", "category: sudo")
+CURL2 = CURL.replace("name: macos_curl", "name: macos_curl2")
+ESF, UL, BOTH = "macos_esf_ecs", "macos_ul_ecs", "macos_esf_ecs+macos_ul_ecs"
+
+
+@pytest.mark.parametrize(
+    "pipeline,bases,condition,extra,error",
+    [
+        (ESF, (CURL, CURL2), "macos_curl and macos_curl2", "group-by: [host.name, User]", None),
+        (ESF, (CURL, CURL2), "macos_curl and macos_curl2", "group-by: [Hostname]", "macOS ESF ECS mapping: Hostname"),
+        (UL, (UL_TCC, UL_SUDO), "ul_tcc and ul_sudo", "group-by: [host.name, userID]", None),
+        (UL, (UL_TCC, UL_SUDO), "ul_tcc and ul_sudo", "group-by: [Hostname]", "macOS unified log mapping: Hostname"),
+        ("macos_ul_raw", (UL_TCC, UL_SUDO), "ul_tcc and ul_sudo", "group-by: [eventType]", None),
+        # aliases resolve through the condition's rules: each pipeline checks its own source's alias field
+        (
+            BOTH,
+            (CURL, UL_TCC),
+            "macos_curl and ul_tcc",
+            "aliases: {pid: {macos_curl: ProcessId, ul_tcc: processID}}\n  group-by: [pid]",
+            None,
+        ),
+        (
+            BOTH,
+            (CURL, UL_TCC),
+            "macos_curl and ul_tcc",
+            "aliases: {pid: {macos_curl: ProcessId, ul_tcc: Hostname}}\n  group-by: [pid]",
+            "macOS unified log mapping: Hostname",
+        ),
+    ],
+)
+def test_correlation_without_rules_key(pipeline, bases, condition, extra, error):
+    """An extended correlation may name its rules only in its condition (no rules: key): the field check still runs."""
+    rules = _correlation(f"  type: temporal\n  {extra}\n  timespan: 5m\n  condition: {condition}", *bases)
+    collection = SigmaCollection.from_yaml(rules)
+    assert collection.rules[-1].rules is None
+    built = [pipelines[name]() for name in pipeline.split("+")]
+    combined = built[0] if len(built) == 1 else built[0] + built[1]
+    if error is None:
+        combined.apply(collection.rules[-1])
+    else:
+        with pytest.raises(SigmaTransformationError, match=f"Field not supported in {error}"):
+            combined.apply(collection.rules[-1])
+
+
 def test_service_endpointsecurity_mixedcase_unknown_category():
     """A rule with service: EndpointSecurity (mixed case) and unknown category fails with category error."""
     rule = """

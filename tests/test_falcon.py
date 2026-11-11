@@ -145,6 +145,24 @@ def test_falcon_fields_and_group_by_checked(extra, error):
             pipeline.apply(collection.rules[-1])
 
 
+@pytest.mark.parametrize("group_by,error", [("Image", None), ("host.name", "host.name")])
+def test_falcon_correlation_without_rules_key(group_by, error):
+    """An extended correlation with no rules: key (its rules only in the condition) is still checked, not a TypeError."""
+    rules = (
+        BASE
+        + "---\n"
+        + BASE.replace("name: base", "name: base2")
+        + f"---\ntitle: C\ncorrelation: {{type: temporal, group-by: [{group_by}], timespan: 1h, condition: base and base2}}\n"
+    )
+    collection = SigmaCollection.from_yaml(rules)
+    assert collection.rules[-1].rules is None
+    if error is None:
+        pipelines["macos_falcon"]().apply(collection.rules[-1])
+    else:
+        with pytest.raises(SigmaTransformationError, match=f"Field not supported in Falcon macOS mapping: {error}"):
+            pipelines["macos_falcon"]().apply(collection.rules[-1])
+
+
 def test_falcon_parent_image_exact_and_endswith():
     assert "ParentBaseFileName=/^Terminal$/i" in convert(
         PC, "        ParentImage: /System/Applications/Utilities/Terminal.app/Terminal"

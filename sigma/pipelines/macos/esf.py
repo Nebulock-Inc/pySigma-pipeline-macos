@@ -123,7 +123,12 @@ class FieldNameCheck(Transformation):
             fieldref = getattr(rule.condition, "fieldref", None)  # an extended (boolean) condition has none
             fieldrefs = [fieldref] if isinstance(fieldref, str) else fieldref or []
             names += [name for name in [*(rule.group_by or []), *fieldrefs] if name not in aliases]
-            refs = {ref.reference: ref.rule for ref in rule.rules if hasattr(ref, "rule")}
+            # rules is None when an extended condition names the rules instead of a rules: key
+            refs = {
+                ref.reference: ref.rule
+                for ref in getattr(rule, "referenced_rules", rule.rules) or []
+                if hasattr(ref, "rule")
+            }
             names += [
                 field
                 for alias in rule.aliases
