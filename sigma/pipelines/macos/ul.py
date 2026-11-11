@@ -87,7 +87,7 @@ def _ul_pipeline(name: str, column: str) -> ProcessingPipeline:
             rule_conditions=[MacOSULCondition()],
         )
     )
-    if column == "ecs":  # the collector's ids are keyword in the UL template, as in ESF documents
+    if column == "ecs":  # user.id and process.pid are strings, as in the ESF pipeline
         items.append(
             ProcessingItem(
                 identifier=f"{name}_string_conversion",
@@ -100,7 +100,7 @@ def _ul_pipeline(name: str, column: str) -> ProcessingPipeline:
 
 
 def macos_ul_ecs() -> ProcessingPipeline:
-    """product: macos, service: unifiedlog rules over the UL collector's ECS documents."""
+    """product: macos, service: unifiedlog rules over ECS documents built from Unified Log entries."""
     return _ul_pipeline("macos_ul_ecs", "ecs")
 
 

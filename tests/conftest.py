@@ -1,4 +1,4 @@
-"""Import the plugin from this checkout, not the editable install from another one."""
+"""Import the plugin from this checkout, not an installed copy."""
 
 import sys
 from pathlib import Path

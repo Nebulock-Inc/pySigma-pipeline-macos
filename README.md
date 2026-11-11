@@ -3,7 +3,7 @@
 
 # pySigma macOS Processing Pipelines
 
-This package adds pySigma processing pipelines for Sigma rules with `product: macos`. It provides the namespace `sigma.pipelines.macos` and a `pipelines` dictionary, which is how sigma-cli discovers plugin pipelines.
+This package adds pySigma processing pipelines for Sigma rules with `product: macos`. It provides the namespace `sigma.pipelines.macos`. pySigma discovers the module-level factory functions (`macos_esf_ecs`, `macos_ul_ecs`, `macos_ul_raw`, `macos_falcon`); the `pipelines` dictionary maps the same names to ready-made pipeline objects.
 
 Rules select macOS telemetry through the logsource:
 
@@ -33,6 +33,8 @@ With sigma-cli:
 | `macos_falcon` | CrowdStrike Falcon (FDR / LogScale) | `process_creation` only. See Limitations. |
 
 Events are expected to have the field names the taxonomy defines. This package does not collect telemetry.
+
+The `ecs_macos_esf` pipeline in pySigma-backend-elasticsearch is a different, Elasticsearch-specific pipeline. `macos_esf_ecs` is the multi-backend layer: it scopes rules by ESF event name and category and works with any pySigma backend that queries ECS fields. A fixed `ecs_macos_esf` is being proposed upstream separately.
 
 ## Examples
 
@@ -77,10 +79,10 @@ sigma-cli:
 
 ## Limitations
 
-* **Falcon is `process_creation` only.** `macos_falcon` converts `Image`, `CommandLine` and `ParentImage` for `process_creation` rules. Every other macOS category, and all `unifiedlog` rules, fail with "not supported on Falcon macOS telemetry". Fields without a Falcon equivalent (for example `SigningID`) also fail rather than being dropped.
+* **Falcon is `process_creation` only.** `macos_falcon` converts `Image`, `CommandLine` and `ParentImage` for `process_creation` rules. Every other macOS category, and all `unifiedlog` rules, fail with "not supported on Falcon macOS telemetry". Fields without a Falcon equivalent (for example `SigningID`) also fail rather than being dropped. `ParentImage` is matched on the parent's basename only (Falcon's `ParentBaseFileName`), so only exact and `endswith` values with a non-empty basename are accepted; `contains`, `startswith` and `re` fail.
 * **No Kusto pipeline.** Microsoft Sentinel and Defender for Endpoint (Kusto) have no macOS tables for ESF or Unified Log data. Defender for Endpoint's `DeviceProcessEvents` carries macOS `process_creation`, and the stock `microsoft_xdr_pipeline` from pySigma-backend-kusto already converts those rules (covered by a test here); this package adds nothing for Kusto.
 * **ES|QL matching is case-sensitive.** With pySigma-backend-elasticsearch 2.1.0 the ES|QL backend emits case-sensitive comparisons, unlike Sigma's default. Use the Lucene or EQL backend where case-insensitive matching matters.
-* **Unified Log `launchd` events** are in the category table, but `log stream` does not deliver `/sbin/launchd` lines, so rules in that category cannot be matched against live-streamed data.
+* **Unified Log `launchd` scoping** matches `processImagePath = /sbin/launchd` (exact path); the pipeline adds no other condition for that category.
 * **ESF only has a `macos_esf_ecs` pipeline.** There is no raw ESF pipeline; raw `eslogger` JSON is not mapped.
 * Only the backends exercised by the tests are known to work: Elasticsearch (Lucene, EQL, ES|QL), Splunk and CrowdStrike LogScale. <!-- TASK16: link the support matrix here -->
 

@@ -1,6 +1,6 @@
 """macOS taxonomy - single source of truth for categories and field mappings."""
 
-from __future__ import annotations  # collectors load this on stock macOS python3 (3.9)
+from __future__ import annotations  # keeps annotations lazy; the table is plain dataclasses and does not import pySigma
 
 from dataclasses import dataclass
 
