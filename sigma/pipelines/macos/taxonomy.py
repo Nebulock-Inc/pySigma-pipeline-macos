@@ -8,7 +8,10 @@ from dataclasses import dataclass
 @dataclass
 class EsfCategory:
     events: tuple[str, ...]
-    ecs: dict[str, str]
+    # The query scope (fields ANDed, a tuple value is any of); its single values are what the data source stamps.
+    ecs: dict[str, str | tuple[str, ...]]
+    # The query scope instead, where it differs from the stamp; a list of such dicts is ORed.
+    scope: dict[str, str | tuple[str, ...]] | list[dict[str, str | tuple[str, ...]]] | None = None
 
 
 @dataclass
@@ -19,7 +22,7 @@ class UlCategory:
 @dataclass
 class EsfField:
     raw: dict[str, str | list[str]]
-    ecs: str | list[str]
+    ecs: str  # written as one document key
 
 
 @dataclass
@@ -30,13 +33,29 @@ class UlField:
 
 ESF_CATEGORIES: dict[str, EsfCategory] = {
     "process_creation": EsfCategory(events=("exec",), ecs={"event.category": "process", "event.type": "start"}),
-    "file_event": EsfCategory(events=("create",), ecs={"event.category": "file", "event.type": "creation"}),
+    # Creates plus the rename destination (TargetFilename is the new path, as in Defend's rename). Creates by
+    # event.type, which the data source and Defend share (their actions differ: create, creation). Renames, which have
+    # no event.type here, take file_rename's stamp: the data source stamps an event with the last category listing it,
+    # so file_rename stays after file_event.
+    "file_event": EsfCategory(
+        events=("create", "rename"),
+        ecs={"event.category": "file", "event.type": "creation"},
+        scope=[
+            {"event.category": "file", "event.type": "creation"},
+            {"event.category": "file", "event.action": "rename"},
+        ],
+    ),
     "file_delete": EsfCategory(events=("unlink",), ecs={"event.category": "file", "event.type": "deletion"}),
     "file_rename": EsfCategory(events=("rename",), ecs={"event.category": "file", "event.action": "rename"}),
     "file_access": EsfCategory(events=("open",), ecs={"event.category": "file", "event.action": "open"}),
+    # event.action does the scoping: file + change alone also matches content writes
     "file_attribute_change": EsfCategory(
         events=("setextattr", "deleteextattr", "setmode", "setowner", "setflags"),
-        ecs={"event.category": "file", "event.type": "change"},
+        ecs={
+            "event.category": "file",
+            "event.type": "change",
+            "event.action": ("setextattr", "deleteextattr", "setmode", "setowner", "setflags"),
+        },
     ),
     "process_access": EsfCategory(
         events=("get_task", "trace"), ecs={"event.category": "process", "event.action": ("get_task", "trace")}
@@ -52,8 +71,8 @@ ESF_CATEGORIES: dict[str, EsfCategory] = {
         ecs={"event.action": ("btm_launch_item_add", "btm_launch_item_remove")},
     ),
     "privilege_change": EsfCategory(
-        events=("setuid", "setgid", "seteuid", "setreuid"),
-        ecs={"event.action": ("setuid", "setgid", "seteuid", "setreuid")},
+        events=("setuid", "setgid", "seteuid", "setreuid", "setegid", "setregid"),
+        ecs={"event.action": ("setuid", "setgid", "seteuid", "setreuid", "setegid", "setregid")},
     ),
     "authentication": EsfCategory(events=("authentication",), ecs={"event.category": "authentication"}),
     "gatekeeper_override": EsfCategory(
@@ -71,9 +90,16 @@ ESF_CATEGORIES: dict[str, EsfCategory] = {
             "od_create_user",
             "od_delete_user",
             "od_modify_password",
+            "od_disable_user",
+            "od_enable_user",
             "od_attribute_value_add",
-            "od_group_add",
+            "od_attribute_value_remove",
+            "od_attribute_set",
             "od_create_group",
+            "od_delete_group",
+            "od_group_add",
+            "od_group_remove",
+            "od_group_set",
         ),
         ecs={
             "event.category": "iam",
@@ -81,9 +107,16 @@ ESF_CATEGORIES: dict[str, EsfCategory] = {
                 "od_create_user",
                 "od_delete_user",
                 "od_modify_password",
+                "od_disable_user",
+                "od_enable_user",
                 "od_attribute_value_add",
-                "od_group_add",
+                "od_attribute_value_remove",
+                "od_attribute_set",
                 "od_create_group",
+                "od_delete_group",
+                "od_group_add",
+                "od_group_remove",
+                "od_group_set",
             ),
         },
     ),
@@ -209,3 +242,7 @@ UL_FIELDS: dict[str, UlField] = {
     "processID": UlField(raw="processID", ecs="process.pid"),
     "userID": UlField(raw="userID", ecs="user.id"),
 }
+
+# Native ndjson keys ECS Unified Log documents don't carry: macos_ul_raw passes them through, macos_ul_ecs fails
+# them. Not in UL_FIELDS, every entry of which is a key of ECS Unified Log documents.
+UL_RAW_ONLY_FIELDS: tuple[str, ...] = ("eventType",)

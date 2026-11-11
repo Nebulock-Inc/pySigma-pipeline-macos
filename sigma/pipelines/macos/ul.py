@@ -10,14 +10,15 @@ from sigma.processing.pipeline import ProcessingItem, ProcessingPipeline
 from sigma.processing.transformations import (
     AddConditionTransformation,
     ConvertTypeTransformation,
+    DetectionItemFailureTransformation,
     FieldMappingTransformation,
     RuleFailureTransformation,
     Transformation,
 )
 from sigma.rule import SigmaRule
 
-from .esf import require_lowercase_logsource
-from .taxonomy import UL_CATEGORIES, UL_FIELDS
+from .esf import FieldNameCheck, KeywordCompareFailure, UnknownFieldCondition, require_lowercase_logsource
+from .taxonomy import UL_CATEGORIES, UL_FIELDS, UL_RAW_ONLY_FIELDS
 
 # UL_CATEGORIES modifier spellings as Sigma field suffixes (see the taxonomy header).
 # shortcut: no "|cased" spellings (none in the table; test_taxonomy rejects them), add them here when one is.
@@ -39,6 +40,7 @@ class MacOSULCondition(RuleProcessingCondition):
         if isinstance(rule, SigmaCorrelationRule):
             return any(hasattr(ref, "rule") and self.match(ref.rule) for ref in rule.referenced_rules)
         ls = rule.logsource
+        # Rules of the other family pass through untouched: coreSigma stacks macos_ul_ecs with macos_esf_ecs.
         if ls.product != "macos" or ls.service != "unifiedlog":
             return False
         if self.unknown:
@@ -69,6 +71,35 @@ def _ul_pipeline(name: str, column: str) -> ProcessingPipeline:
             rule_conditions=[MacOSULCondition(unknown=True)],
         ),
     ]
+    mapping = {k: getattr(f, column) for k, f in UL_FIELDS.items()}
+    names = mapping | ({f: f for f in UL_RAW_ONLY_FIELDS} if column == "raw" else {})  # raw-only keys pass as they are
+    if column == "ecs":
+        items.append(
+            ProcessingItem(
+                identifier=f"{name}_raw_only_field_failure",
+                transformation=DetectionItemFailureTransformation(
+                    f"{', '.join(UL_RAW_ONLY_FIELDS)} is not carried by ECS Unified Log documents "
+                    "(macos_ul_raw has it)"
+                ),
+                rule_conditions=[MacOSULCondition()],
+                field_name_conditions=[IncludeFieldCondition(list(UL_RAW_ONLY_FIELDS))],
+            )
+        )
+    items.append(
+        ProcessingItem(
+            identifier=f"{name}_unmapped_field_failure",
+            transformation=DetectionItemFailureTransformation("Field not supported in macOS unified log mapping"),
+            rule_conditions=[MacOSULCondition()],
+            field_name_conditions=[UnknownFieldCondition(list(names))],
+        )
+    )
+    items.append(
+        ProcessingItem(
+            identifier=f"{name}_field_name_check",
+            transformation=FieldNameCheck("macOS unified log", names, MacOSULCondition()),
+            rule_conditions=[MacOSULCondition()],
+        )
+    )
     for category, cat in UL_CATEGORIES.items():
         items.append(
             ProcessingItem(
@@ -83,11 +114,19 @@ def _ul_pipeline(name: str, column: str) -> ProcessingPipeline:
     items.append(
         ProcessingItem(
             identifier=f"{name}_field_mapping",
-            transformation=FieldMappingTransformation({k: getattr(f, column) for k, f in UL_FIELDS.items()}),
+            transformation=FieldMappingTransformation(mapping),
             rule_conditions=[MacOSULCondition()],
         )
     )
     if column == "ecs":  # user.id and process.pid are strings, as in the ESF pipeline
+        items.append(
+            ProcessingItem(
+                identifier=f"{name}_keyword_compare_failure",
+                transformation=KeywordCompareFailure(),
+                field_name_conditions=[IncludeFieldCondition(["user.id", "process.pid"])],
+                rule_conditions=[MacOSULCondition()],
+            )
+        )
         items.append(
             ProcessingItem(
                 identifier=f"{name}_string_conversion",

@@ -11,6 +11,7 @@ from sigma.pipelines.macos.taxonomy import ESF_CATEGORIES, UL_CATEGORIES
 
 def test_every_category_event_is_real():
     """Every event name in ESF_CATEGORIES must appear in eslogger --list-events output."""
+    # Load the fixture from repo root
     fixture_path = Path(__file__).parent / "fixtures" / "eslogger_events.txt"
     with open(fixture_path) as f:
         real_events = {line.strip() for line in f if line.strip()}

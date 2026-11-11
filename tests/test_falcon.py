@@ -23,7 +23,7 @@ detection:
 {selection}
     condition: selection
 """
-    backend = LogScaleBackend(processing_pipeline=pipelines["macos_falcon"])
+    backend = LogScaleBackend(processing_pipeline=pipelines["macos_falcon"]())
     return backend.convert(SigmaCollection.from_yaml(rule))[0]
 
 
@@ -95,7 +95,7 @@ correlation:
 """
     # LogScale has no correlation support, so exercise the pipeline directly.
     collection = SigmaCollection.from_yaml(rules)
-    pipelines["macos_falcon"].apply(collection.rules[1])
+    pipelines["macos_falcon"]().apply(collection.rules[1])
 
 
 def test_falcon_parent_image_exact_and_endswith():
