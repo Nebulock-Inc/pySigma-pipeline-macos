@@ -28,7 +28,7 @@ With sigma-cli:
 | Pipeline | Targets | Notes |
 |---|---|---|
 | `macos_esf_ecs` | ECS documents built from Endpoint Security events | Supports the 22 ESF categories in `sigma/pipelines/macos/taxonomy.py` (`process_creation`, `file_event`, `tcc_modification`, `sudo`, ...). Sigma fields are mapped to ECS field names; the logsource is replaced by ECS `event.*` conditions. |
-| `macos_ul_ecs` | ECS documents built from Unified Log entries | Supports the 10 Unified Log categories in the taxonomy. Adds the subsystem / process predicate for the category and maps fields to ECS names. |
+| `macos_ul_ecs` | ECS documents built from Unified Log entries by the coreSigma collector | Supports the 10 Unified Log categories in the taxonomy. Adds the subsystem / process predicate for the category and maps fields to the collector's names (`unified_log.subsystem`, `unified_log.sender_image_path`, `log.level`, ...). Elastic's macOS Unified Logs integration names two fields differently (`dll.path`, `unified_log.message_type`); a separate pipeline for it is proposed upstream. |
 | `macos_ul_raw` | Native `log --style ndjson` keys (`subsystem`, `processImagePath`, `eventMessage`, ...) | Same categories as `macos_ul_ecs`, with the native key names. |
 | `macos_falcon` | CrowdStrike Falcon (FDR / LogScale) | `process_creation` only. See Limitations. |
 
