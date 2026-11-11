@@ -10,7 +10,9 @@ Rules select macOS telemetry through the logsource:
 * `product: macos` with a `category` such as `process_creation` (optionally `service: endpointsecurity`) is Endpoint Security Framework (ESF) data.
 * `product: macos` with `service: unifiedlog` is Unified Log data. The category narrows which log lines are in scope (for example `sudo`, `tcc`, `gatekeeper`, `mdm`).
 
-`process_creation` is scoped to the `exec` event (`event.action: exec`), so it does not match other process events. Logsource values must be lowercase, and a macOS rule whose `service` is anything other than `endpointsecurity` or `unifiedlog` (a misspelling such as `unifiedlogs`) fails conversion instead of being converted unscoped. A macOS rule with a wrong-case value fails conversion with a clear error instead of being silently skipped.
+`process_creation` is scoped to the `exec` event (`event.action: exec`), so it does not match other process events. Logsource values must be lowercase, and a macOS rule whose `service` is anything other than `endpointsecurity` or `unifiedlog` (a misspelling such as `unifiedlogs`) fails conversion instead of being converted unscoped. A wrong-case value fails conversion with a clear error instead of being silently skipped.
+
+Each pipeline scopes only its own family. A Unified Log pipeline run alone passes an ESF rule through unscoped and unmapped, and the ESF pipeline does the same for a Unified Log rule. Stack both pipelines (for example `-p macos_esf_ecs -p macos_ul_ecs`), or use the one that matches the rule's service.
 
 ## Install
 
@@ -34,7 +36,7 @@ With sigma-cli:
 
 Events are expected to have the field names the taxonomy defines. This package does not collect telemetry.
 
-Field checks: `macos_falcon` also fails unknown fields in correlation group-by, aliases and condition fields, and in `fields:` lists of correlated rules (a base rule's own `fields:` is not checked, because LogScale ignores it). The ESF and Unified Log pipelines fail a rule that uses a field the taxonomy does not know, in a detection item, in a `fields:` list, in a correlation's group-by, and in a correlation's condition field, instead of producing a query that never matches. `process.pid` and `process.parent.pid` values are emitted as strings, matching an index that maps them as keyword. Elastic Defend maps them as long, so for Elastic Defend data use the upstream `ecs_macos_esf` pipeline instead. `user.id` and similar id fields are keywords: plain values are converted to strings, and numeric comparisons (`gt`, `lt`, ...) on them fail instead of comparing a keyword with a number.
+Field checks: `macos_falcon` also fails unknown fields in correlation group-by, aliases and condition fields, and in a correlation rule's own `fields:` (a base rule's own `fields:` is not checked, because LogScale ignores it). The ESF and Unified Log pipelines fail a rule that uses a field the taxonomy does not know, in a detection item, in a `fields:` list, in a correlation's group-by, and in a correlation's condition field, instead of producing a query that never matches. `process.pid` and `process.parent.pid` values are emitted as strings, which matches keyword-mapped pid fields. Elastic Defend's long-typed pid fields are not supported in this release. `user.id` and similar id fields are keywords: plain values are converted to strings, and numeric comparisons (`gt`, `lt`, ...) on them fail instead of comparing a keyword with a number.
 
 The `ecs_macos_esf` pipeline in pySigma-backend-elasticsearch is a different, Elasticsearch-specific pipeline. `macos_esf_ecs` is the multi-backend layer: it scopes rules by ESF event name and category and is tested with the Lucene, EQL, ES|QL, Splunk and LogScale backends. A fixed `ecs_macos_esf` is being proposed upstream separately.
 
@@ -88,6 +90,7 @@ sigma-cli:
 * **ES|QL matching is case-sensitive.** With pySigma-backend-elasticsearch 2.1.0 the ES|QL backend emits case-sensitive comparisons, unlike Sigma's default. Use the Lucene or EQL backend where case-insensitive matching matters.
 * **Unified Log `launchd` scoping** matches `processImagePath = /sbin/launchd` (exact path); the pipeline adds no other condition for that category.
 * **ESF only has a `macos_esf_ecs` pipeline.** There is no raw ESF pipeline; raw `eslogger` JSON is not mapped.
+* **LogScale has no correlation support.** LogScale (pySigma-backend-crowdstrike) does not convert correlation rules, so the Falcon correlation field checks only matter for other backends.
 * Only the backends exercised by the tests are known to work: Elasticsearch (Lucene, EQL, ES|QL), Splunk and CrowdStrike LogScale. <!-- TASK16: link the support matrix here -->
 
 ## Tested versions
