@@ -81,6 +81,24 @@ sigma-cli:
     sigma convert -t lucene -p macos_esf_ecs rule.yml
     sigma convert -t splunk -p macos_ul_raw rule.yml
 
+## Fields for account, authentication and policy categories
+
+Besides the process fields (`Image`, `CommandLine`, `User`, `UserId`, ...), these categories have fields of their own. All map to ECS or ECS-style names; see `ESF_FIELDS` in `taxonomy.py` for the exact keys.
+
+| Category | Sigma fields |
+|---|---|
+| `authentication` | `TargetUser`, `Success`, `AuthenticationType`, `InstigatorImage` (Open Directory logins only) |
+| `sudo` (events `sudo` and `su`) | `SourceUser`, `TargetUser`, `TargetUserId`, `TargetImage` (the program run), `Success`, `FailureReason` |
+| `screen_sharing` | `TargetUser`, `Success`, `SourceAddress`, `ViewerAppleID`, `ExistingSession` |
+| `configuration_profile` | `ProfileIdentifier`, `ProfileDisplayName`, `ProfileInstallSource`, `ProfileScope`, `InstigatorImage` |
+| `xprotect` | `MalwareIdentifier`, `MalwareIncidentIdentifier`, `RemediationAction`, `TargetFilename`, `Success` (remediation only) |
+| `gatekeeper_override` | `TargetFilename`, `FileSha256`, `FileSigningID`, `FileTeamID` |
+| `user_account_change` | `TargetUser`, `TargetGroup`, `OdAttributeName`, `OdAttributeValue`, `Success`, `InstigatorImage` |
+
+`Success` is a boolean in Sigma: `true` converts to `event.outcome: success` and `false` to `event.outcome: failure`; any other value fails conversion. `setowner` and `setflags` in `file_attribute_change` also expose the target path as `TargetFilename`.
+
+The `xprotect` and `gatekeeper_override` fields come from the member names in Apple's Endpoint Security headers; those events were not observed in captures, so treat them as unverified against live data.
+
 ## Limitations
 
 * **Falcon is `process_creation` only, with no keyword search.** Keyword (field-less) detection items fail with a clear message. `macos_falcon` converts `Image`, `CommandLine` and `ParentImage` for `process_creation` rules. Every other macOS category, and all `unifiedlog` rules, fail with "not supported on Falcon macOS telemetry". Fields without a Falcon equivalent (for example `SigningID`) also fail rather than being dropped. `ParentImage` is matched on the parent's basename only (Falcon's `ParentBaseFileName`), so only exact and `endswith` values with a non-empty basename are accepted; `contains`, `startswith` and `re` fail.

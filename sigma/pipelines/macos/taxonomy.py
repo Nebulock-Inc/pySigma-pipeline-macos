@@ -132,6 +132,9 @@ ESF_CATEGORIES: dict[str, EsfCategory] = {
     ),
 }
 
+# Open Directory events: every one reports its instigator (the XPC caller) and an error code (0 is success)
+OD_EVENTS = ESF_CATEGORIES["user_account_change"].events
+
 ESF_FIELDS: dict[str, EsfField] = {
     "Image": EsfField(
         raw={"exec": "event.exec.target.executable.path", "*": "process.executable.path"}, ecs="process.executable"
@@ -155,6 +158,18 @@ ESF_FIELDS: dict[str, EsfField] = {
             "setextattr": "event.setextattr.target.path",
             "deleteextattr": "event.deleteextattr.target.path",
             "setmode": "event.setmode.target.path",
+            "setowner": "event.setowner.target.path",
+            "setflags": "event.setflags.target.path",
+            # xp_malware_* and gatekeeper_user_override: from the ESF headers; not observed in captures
+            "xp_malware_detected": "event.xp_malware_detected.detected_path",
+            "xp_malware_remediated": "event.xp_malware_remediated.remediated_path",
+            # file is a union: an es_file_t, or the bare path string when ESF couldn't resolve the file. file.file.path
+            # comes before the bare file, so an arm-nested es_file_t never puts an object in file.path.
+            "gatekeeper_user_override": [
+                "event.gatekeeper_user_override.file.path",
+                "event.gatekeeper_user_override.file.file.path",
+                "event.gatekeeper_user_override.file",
+            ],
         },
         ecs="file.path",
     ),
@@ -171,7 +186,13 @@ ESF_FIELDS: dict[str, EsfField] = {
         ecs="file.Ext.extattr",
     ),
     "TargetImage": EsfField(
-        raw={"signal": "event.signal.target.executable.path", "get_task": "event.get_task.target.executable.path"},
+        raw={
+            "signal": "event.signal.target.executable.path",
+            "get_task": "event.get_task.target.executable.path",
+            # the program sudo and su run: sudo's resolved command path (no arguments), su's shell
+            "sudo": "event.sudo.command",
+            "su": "event.su.shell",
+        },
         ecs="Target.process.executable",
     ),
     "SignalNumber": EsfField(raw={"signal": "event.signal.sig"}, ecs="signal.number"),
@@ -186,6 +207,11 @@ ESF_FIELDS: dict[str, EsfField] = {
             "tcc_modify": "event.tcc_modify.instigator.executable.path",
             "btm_launch_item_add": "event.btm_launch_item_add.instigator.executable.path",
             "btm_launch_item_remove": "event.btm_launch_item_remove.instigator.executable.path",
+            # opendirectoryd and mdmclient report these; the instigator is the process that asked (dscl, sysadminctl)
+            "authentication": "event.authentication.data.od.instigator.executable.path",  # OD logins only
+            "profile_add": "event.profile_add.instigator.executable.path",
+            "profile_remove": "event.profile_remove.instigator.executable.path",
+            **{event: f"event.{event}.instigator.executable.path" for event in OD_EVENTS},
         },
         ecs="process.parent.executable",
     ),
@@ -196,9 +222,164 @@ ESF_FIELDS: dict[str, EsfField] = {
     "BtmExecutable": EsfField(
         raw={"btm_launch_item_add": "event.btm_launch_item_add.executable_path"}, ecs="btm.executable_path"
     ),
-    "TargetUserId": EsfField(raw={"setuid": "event.setuid.uid"}, ecs="user.target.id"),
+    "TargetUserId": EsfField(
+        raw={"setuid": "event.setuid.uid", "sudo": "event.sudo.to_uid", "su": "event.su.to_uid"}, ecs="user.target.id"
+    ),
     "TargetGroupId": EsfField(raw={"setgid": "event.setgid.gid"}, ecs="user.target.group.id"),
     "KextIdentifier": EsfField(raw={"kextload": "event.kextload.identifier"}, ecs="kext.identifier"),
+    # user.* stays the acting process's user (User, UserId), as in Elastic Defend: for these events that's the process
+    # reporting them (sudo, su, opendirectoryd), so the users the event is about get their own fields.
+    # SourceUser -> source.user.name, who ran sudo or su: a convention of this pipeline. ECS would put the requester in user.*,
+    # which here stays the acting process's user; source.user.* is ECS's other nesting for a user the event comes from.
+    "SourceUser": EsfField(
+        raw={"sudo": "event.sudo.from_username", "su": "event.su.from_username"}, ecs="source.user.name"
+    ),
+    # TargetUser -> user.target.name, the account the event targets: for sudo and su the run-as user (a convention of
+    # this pipeline, as TargetUserId for setuid; ECS would say user.effective), the account authenticated or logged in to
+    # by screen sharing, the account an OD change is about (ECS IAM). For od_group_add/od_group_remove
+    # (member.member_value) and the od_attribute_* events (record_name) it can be a UUID or a group name instead:
+    # member_type and record_type, which aren't mapped, say which.
+    "TargetUser": EsfField(
+        raw={
+            "sudo": "event.sudo.to_username",
+            "su": "event.su.to_username",
+            "authentication": "event.authentication.data.od.record_name",  # OD logins only
+            "screensharing_attach": "event.screensharing_attach.authentication_username",
+            "od_create_user": "event.od_create_user.user_name",
+            "od_delete_user": "event.od_delete_user.user_name",
+            "od_disable_user": "event.od_disable_user.user_name",
+            "od_enable_user": "event.od_enable_user.user_name",
+            "od_modify_password": "event.od_modify_password.account_name",
+            "od_group_add": "event.od_group_add.member.member_value",
+            "od_group_remove": "event.od_group_remove.member.member_value",
+            "od_attribute_value_add": "event.od_attribute_value_add.record_name",
+            "od_attribute_value_remove": "event.od_attribute_value_remove.record_name",
+            "od_attribute_set": "event.od_attribute_set.record_name",
+        },
+        ecs="user.target.name",
+    ),
+    "TargetGroup": EsfField(
+        raw={
+            event: f"event.{event}.group_name"
+            for event in ("od_group_add", "od_group_remove", "od_group_set", "od_create_group", "od_delete_group")
+        },
+        ecs="user.target.group.name",
+    ),
+    # A boolean in Sigma; the documents carry ECS event.outcome values (success, failure). OD events report an
+    # error code instead, 0 for success.
+    "Success": EsfField(
+        raw={
+            "sudo": "event.sudo.success",
+            "su": "event.su.success",
+            "authentication": "event.authentication.success",
+            "screensharing_attach": "event.screensharing_attach.success",
+            "xp_malware_remediated": "event.xp_malware_remediated.success",  # from the ESF headers
+            **{event: f"event.{event}.error_code" for event in OD_EVENTS},
+        },
+        ecs="event.outcome",
+    ),
+    # Observed: a non-sudoer's rejected sudo has reject_info {plugin_name, plugin_type, failure_message}; su's key
+    # is observed (null on success)
+    "FailureReason": EsfField(
+        raw={"sudo": "event.sudo.reject_info.failure_message", "su": "event.su.failure_message"}, ecs="event.reason"
+    ),
+    # Not ECS (no authentication field set there): ESF's es_authentication_type_t, 0 OD, 1 Touch ID, 2 token,
+    # 3 Auto Unlock
+    "AuthenticationType": EsfField(raw={"authentication": "event.authentication.type"}, ecs="authentication.type"),
+    # source.address, not source.ip: ESF's address can also be a named socket, and ECS keeps the raw address there
+    "SourceAddress": EsfField(
+        raw={
+            "screensharing_attach": "event.screensharing_attach.source_address",
+            "screensharing_detach": "event.screensharing_detach.source_address",
+        },
+        ecs="source.address",
+    ),
+    # Not ECS: screen sharing specifics, under screensharing.* as TCC's are under tcc.*
+    "ViewerAppleID": EsfField(
+        raw={
+            "screensharing_attach": "event.screensharing_attach.viewer_appleid",
+            "screensharing_detach": "event.screensharing_detach.viewer_appleid",
+        },
+        ecs="screensharing.viewer_appleid",
+    ),
+    "ExistingSession": EsfField(
+        raw={"screensharing_attach": "event.screensharing_attach.existing_session"},
+        ecs="screensharing.existing_session",
+    ),
+    # Not ECS (no configuration profile field set there): profile.*, ESF's es_profile_t member names
+    "ProfileIdentifier": EsfField(
+        raw={
+            "profile_add": "event.profile_add.profile.identifier",
+            "profile_remove": "event.profile_remove.profile.identifier",
+        },
+        ecs="profile.identifier",
+    ),
+    "ProfileDisplayName": EsfField(
+        raw={
+            "profile_add": "event.profile_add.profile.display_name",
+            "profile_remove": "event.profile_remove.profile.display_name",
+        },
+        ecs="profile.display_name",
+    ),
+    # es_profile_source_t: 0 managed (MDM), 1 installed manually
+    "ProfileInstallSource": EsfField(
+        raw={
+            "profile_add": "event.profile_add.profile.install_source",
+            "profile_remove": "event.profile_remove.profile.install_source",
+        },
+        ecs="profile.install_source",
+    ),
+    "ProfileScope": EsfField(
+        raw={"profile_add": "event.profile_add.profile.scope", "profile_remove": "event.profile_remove.profile.scope"},
+        ecs="profile.scope",
+    ),
+    # Not ECS: Open Directory attribute changes, under od.*
+    "OdAttributeName": EsfField(
+        raw={
+            event: f"event.{event}.attribute_name"
+            for event in ("od_attribute_value_add", "od_attribute_value_remove", "od_attribute_set")
+        },
+        ecs="od.attribute_name",
+    ),
+    "OdAttributeValue": EsfField(
+        raw={
+            "od_attribute_value_add": "event.od_attribute_value_add.attribute_value",
+            "od_attribute_value_remove": "event.od_attribute_value_remove.attribute_value",
+            # od_attribute_set reports a list of values: the documents carry them joined with spaces
+            "od_attribute_set": "event.od_attribute_set.attribute_values",
+        },
+        ecs="od.attribute_value",
+    ),
+    # xprotect: from the ESF headers; not observed in captures. Not ECS: under xprotect.*, ESF's member names.
+    "MalwareIdentifier": EsfField(
+        raw={
+            "xp_malware_detected": "event.xp_malware_detected.malware_identifier",
+            "xp_malware_remediated": "event.xp_malware_remediated.malware_identifier",
+        },
+        ecs="xprotect.malware_identifier",
+    ),
+    "MalwareIncidentIdentifier": EsfField(
+        raw={
+            "xp_malware_detected": "event.xp_malware_detected.incident_identifier",
+            "xp_malware_remediated": "event.xp_malware_remediated.incident_identifier",
+        },
+        ecs="xprotect.incident_identifier",
+    ),
+    "RemediationAction": EsfField(
+        raw={"xp_malware_remediated": "event.xp_malware_remediated.action_type"}, ecs="xprotect.action_type"
+    ),
+    # gatekeeper_user_override: from the ESF headers; not observed in captures. The file the user let run.
+    "FileSha256": EsfField(
+        raw={"gatekeeper_user_override": "event.gatekeeper_user_override.sha256"}, ecs="file.hash.sha256"
+    ),
+    "FileSigningID": EsfField(
+        raw={"gatekeeper_user_override": "event.gatekeeper_user_override.signing_info.signing_id"},
+        ecs="file.code_signature.signing_id",
+    ),
+    "FileTeamID": EsfField(
+        raw={"gatekeeper_user_override": "event.gatekeeper_user_override.signing_info.team_id"},
+        ecs="file.code_signature.team_id",
+    ),
     "User": EsfField(raw={}, ecs="user.name"),
     "UserId": EsfField(raw={}, ecs="user.id"),
     "Signed": EsfField(raw={}, ecs="process.code_signature.exists"),

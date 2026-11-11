@@ -689,3 +689,112 @@ correlation:
         'event.category="process" event.type="start" event.action="exec" process.executable="*/curl"\n\n'
         "| bin _time span=5m\n| stats count as event_count by _time user.name\n\n| search event_count >= 10"
     ]
+
+
+# Fields of the seven categories that had none of their own, and file_attribute_change's setowner/setflags target:
+# (category, selection, the Lucene item it becomes)
+CATEGORY_FIELDS = [
+    ("sudo", "SourceUser: alice", "source.user.name:alice"),
+    ("sudo", "TargetUser: root", "user.target.name:root"),
+    ("sudo", "TargetUserId: 0", "user.target.id:0"),
+    ("sudo", "TargetImage: /bin/sh", "Target.process.executable:\\/bin\\/sh"),
+    ("sudo", "FailureReason|contains: incorrect", "event.reason:*incorrect*"),
+    ("authentication", "AuthenticationType: 0", "authentication.type:0"),
+    ("authentication", "TargetUser: alice", "user.target.name:alice"),
+    ("authentication", "InstigatorImage: /usr/bin/dscl", "process.parent.executable:\\/usr\\/bin\\/dscl"),
+    ("screen_sharing", "SourceAddress: 10.0.0.1", "source.address:10.0.0.1"),
+    ("screen_sharing", "ViewerAppleID: viewer", "screensharing.viewer_appleid:viewer"),
+    ("screen_sharing", "ExistingSession: true", "screensharing.existing_session:true"),
+    ("configuration_profile", "ProfileIdentifier: com.example.p", "profile.identifier:com.example.p"),
+    ("configuration_profile", "ProfileDisplayName: VPN", "profile.display_name:VPN"),
+    ("configuration_profile", "ProfileInstallSource: 1", "profile.install_source:1"),
+    ("configuration_profile", "ProfileScope: user", "profile.scope:user"),
+    ("user_account_change", "TargetGroup: admin", "user.target.group.name:admin"),
+    ("user_account_change", "OdAttributeName: IsHidden", "od.attribute_name:IsHidden"),
+    ("user_account_change", "OdAttributeValue: 1", "od.attribute_value:1"),
+    ("xprotect", "MalwareIdentifier: Example", "xprotect.malware_identifier:Example"),
+    ("xprotect", "MalwareIncidentIdentifier: abc", "xprotect.incident_identifier:abc"),
+    ("xprotect", "RemediationAction: path_delete", "xprotect.action_type:path_delete"),
+    ("xprotect", "TargetFilename|endswith: .app", "file.path:*.app"),
+    ("gatekeeper_override", "TargetFilename|endswith: .app", "file.path:*.app"),
+    ("gatekeeper_override", "FileSha256: abc", "file.hash.sha256:abc"),
+    ("gatekeeper_override", "FileSigningID: com.example.app", "file.code_signature.signing_id:com.example.app"),
+    ("gatekeeper_override", "FileTeamID: ABCDE12345", "file.code_signature.team_id:ABCDE12345"),
+    ("file_attribute_change", "TargetFilename|endswith: .plist", "file.path:*.plist"),
+]
+
+
+@pytest.mark.parametrize("category,selection,item", CATEGORY_FIELDS)
+def test_category_fields_map_to_ecs(category, selection, item):
+    rule = f"""
+title: t
+logsource: {{product: macos, category: {category}}}
+detection:
+    selection:
+        {selection}
+    condition: selection
+"""
+    [query] = LuceneBackend(processing_pipeline=pipelines["macos_esf_ecs"]()).convert(SigmaCollection.from_yaml(rule))
+    assert query.endswith(f" AND {item}"), query
+
+
+def test_category_fields_pass_field_checks():
+    """The new names pass the fields: check, as Sigma names and as their ECS targets."""
+    from sigma.backends.splunk import SplunkBackend
+
+    names = sorted({selection.split(":")[0].split("|")[0] for _, selection, _ in CATEGORY_FIELDS} | {"Success"})
+    targets = [item.split(":")[0] for _, _, item in CATEGORY_FIELDS]
+    for fields in (names, targets):
+        rule = CURL.replace("process_creation", "sudo") + f"fields: [{', '.join(fields)}]\n"
+        [query] = SplunkBackend(processing_pipeline=pipelines["macos_esf_ecs"]()).convert(
+            SigmaCollection.from_yaml(rule)
+        )
+        assert "| table " in query
+
+
+@pytest.mark.parametrize("value,outcome", [("true", "success"), ("false", "failure")])
+def test_success_is_ecs_outcome(value, outcome):
+    """Success is a boolean in Sigma (as ESF reports it) and ECS event.outcome success/failure in the documents."""
+    rule = f"""
+title: t
+logsource: {{product: macos, category: sudo}}
+detection:
+    selection:
+        Success: {value}
+    condition: selection
+"""
+    [query] = LuceneBackend(processing_pipeline=pipelines["macos_esf_ecs"]()).convert(SigmaCollection.from_yaml(rule))
+    assert query.endswith(f" AND event.outcome:{outcome}"), query
+    [esql] = ESQLBackend(processing_pipeline=pipelines["macos_esf_ecs"]()).convert(SigmaCollection.from_yaml(rule))
+    assert f'event.outcome=="{outcome}"' in esql, esql
+
+
+@pytest.mark.parametrize("value", ["success", "1", "null"])
+def test_success_takes_only_booleans(value):
+    rule = f"""
+title: t
+logsource: {{product: macos, category: authentication}}
+detection:
+    selection:
+        Success: {value}
+    condition: selection
+"""
+    with pytest.raises(SigmaTransformationError, match="Success takes true or false"):
+        LuceneBackend(processing_pipeline=pipelines["macos_esf_ecs"]()).convert(SigmaCollection.from_yaml(rule))
+
+
+def test_rejected_sudo_rule():
+    """A failed sudo by its reason, as eslogger reports it (reject_info.failure_message), on EQL and ES|QL."""
+    rule = """
+title: t
+logsource: {product: macos, category: sudo}
+detection:
+    selection:
+        Success: false
+        FailureReason: user NOT in sudoers
+    condition: selection
+"""
+    [eql] = EqlBackend(processing_pipeline=pipelines["macos_esf_ecs"]()).convert(SigmaCollection.from_yaml(rule))
+    assert eql.endswith('and (event.outcome:"failure" and event.reason:"user NOT in sudoers")'), eql
+    [esql] = ESQLBackend(processing_pipeline=pipelines["macos_esf_ecs"]()).convert(SigmaCollection.from_yaml(rule))
+    assert 'event.outcome=="failure" and event.reason=="user NOT in sudoers"' in esql, esql

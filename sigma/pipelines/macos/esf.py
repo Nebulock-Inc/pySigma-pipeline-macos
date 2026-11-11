@@ -20,7 +20,7 @@ from sigma.processing.transformations import (
 )
 from sigma.processing.transformations.base import DetectionItemTransformation
 from sigma.rule import SigmaRule
-from sigma.types import SigmaCompareExpression
+from sigma.types import SigmaBool, SigmaCompareExpression, SigmaString
 
 from .taxonomy import ESF_CATEGORIES, ESF_FIELDS
 
@@ -87,6 +87,15 @@ class KeywordCompareFailure(DetectionItemTransformation):
             )
 
 
+class SuccessOutcome(DetectionItemTransformation):
+    """Success true/false as the ECS event.outcome values the documents carry: success, failure."""
+
+    def apply_detection_item(self, detection_item) -> None:
+        if not all(isinstance(value, SigmaBool) for value in detection_item.value):
+            raise SigmaTransformationError("Success takes true or false", source=detection_item.source)
+        detection_item.value = [SigmaString("success" if value else "failure") for value in detection_item.value]
+
+
 class MacOSServiceCheck(Transformation):
     """Fail a macOS rule whose service no pipeline knows: it would convert with no scope and no field check.
 
@@ -123,7 +132,7 @@ class FieldNameCheck(Transformation):
             fieldref = getattr(rule.condition, "fieldref", None)  # an extended (boolean) condition has none
             fieldrefs = [fieldref] if isinstance(fieldref, str) else fieldref or []
             names += [name for name in [*(rule.group_by or []), *fieldrefs] if name not in aliases]
-            # rules is None when an extended condition names the rules instead of a rules: key
+            # rules is None when an extended condition names the rules instead of a rules: key; referenced_rules isn't
             refs = {ref.reference: ref.rule for ref in rule.referenced_rules if hasattr(ref, "rule")}
             names += [
                 field
@@ -167,7 +176,7 @@ def macos_esf_ecs() -> ProcessingPipeline:
     Converts product: macos rules (with no service or service: endpointsecurity)
     into queries over ECS documents shaped like Elastic Defend's (pid values as strings).
     It emits process.pid and process.parent.pid values as strings, to match an index that maps them as
-    keyword. Elastic Defend's long-typed pid fields are not supported in this release.
+    keyword; Elastic Defend's long-typed pid fields aren't supported in this release.
     """
     items = [ProcessingItem(identifier="macos_esf_ecs_unknown_service", transformation=MacOSServiceCheck())]
 
@@ -233,6 +242,15 @@ def macos_esf_ecs() -> ProcessingPipeline:
                 rule_conditions=[MacOSESFCondition(category=category)],
             )
         )
+
+    items.append(
+        ProcessingItem(
+            identifier="macos_esf_ecs_success_outcome",
+            transformation=SuccessOutcome(),
+            field_name_conditions=[IncludeFieldCondition(["Success"])],
+            rule_conditions=[MacOSESFCondition()],
+        )
+    )
 
     # Build field mapping from taxonomy
     # Scoped to ESF rules only (no service or service: endpointsecurity)
