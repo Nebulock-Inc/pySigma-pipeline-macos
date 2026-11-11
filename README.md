@@ -34,7 +34,7 @@ With sigma-cli:
 
 Events are expected to have the field names the taxonomy defines. This package does not collect telemetry.
 
-The `ecs_macos_esf` pipeline in pySigma-backend-elasticsearch is a different, Elasticsearch-specific pipeline. `macos_esf_ecs` is the multi-backend layer: it scopes rules by ESF event name and category and works with any pySigma backend that queries ECS fields. A fixed `ecs_macos_esf` is being proposed upstream separately.
+The `ecs_macos_esf` pipeline in pySigma-backend-elasticsearch is a different, Elasticsearch-specific pipeline. `macos_esf_ecs` is the multi-backend layer: it scopes rules by ESF event name and category and is tested with the Lucene, EQL, ES|QL, Splunk and LogScale backends. A fixed `ecs_macos_esf` is being proposed upstream separately.
 
 ## Examples
 
