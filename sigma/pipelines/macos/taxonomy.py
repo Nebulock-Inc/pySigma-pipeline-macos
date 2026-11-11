@@ -163,11 +163,12 @@ ESF_FIELDS: dict[str, EsfField] = {
             # xp_malware_* and gatekeeper_user_override: from the ESF headers; not observed in captures
             "xp_malware_detected": "event.xp_malware_detected.detected_path",
             "xp_malware_remediated": "event.xp_malware_remediated.remediated_path",
-            # file is a union: an es_file_t, or the bare path string when ESF couldn't resolve the file. file.file.path
-            # comes before the bare file, so an arm-nested es_file_t never puts an object in file.path.
+            # file is a union: an es_file_t, or the bare path string when ESF couldn't resolve the file. The arm-nested
+            # forms (file.file.path, file.file_path) come before the bare file, so an object never lands in file.path.
             "gatekeeper_user_override": [
                 "event.gatekeeper_user_override.file.path",
                 "event.gatekeeper_user_override.file.file.path",
+                "event.gatekeeper_user_override.file.file_path",
                 "event.gatekeeper_user_override.file",
             ],
         },
@@ -244,6 +245,7 @@ ESF_FIELDS: dict[str, EsfField] = {
             "sudo": "event.sudo.to_username",
             "su": "event.su.to_username",
             "authentication": "event.authentication.data.od.record_name",  # OD logins only
+            # the account used to authenticate (null for a VNC-password session); session_username is the session's user
             "screensharing_attach": "event.screensharing_attach.authentication_username",
             "od_create_user": "event.od_create_user.user_name",
             "od_delete_user": "event.od_delete_user.user_name",

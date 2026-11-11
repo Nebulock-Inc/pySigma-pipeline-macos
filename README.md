@@ -36,7 +36,7 @@ With sigma-cli:
 
 Events are expected to have the field names the taxonomy defines. This package does not collect telemetry.
 
-Field checks: `macos_falcon` also fails unknown fields in correlation group-by, aliases and condition fields, and in a correlation rule's own `fields:` (a base rule's own `fields:` is not checked, because LogScale ignores it). The ESF and Unified Log pipelines fail a rule that uses a field the taxonomy does not know, in a detection item, in a `fields:` list, in a correlation's group-by, and in a correlation's condition field, instead of producing a query that never matches. `process.pid` and `process.parent.pid` values are emitted as strings, which matches keyword-mapped pid fields. Elastic Defend's long-typed pid fields are not supported in this release. `user.id` and similar id fields are keywords: plain values are converted to strings, and numeric comparisons (`gt`, `lt`, ...) on them fail instead of comparing a keyword with a number.
+Field checks: `macos_falcon` also fails unknown fields in correlation group-by, aliases and condition fields, and in a correlation rule's own `fields:` (a base rule's own `fields:` is not checked, because LogScale ignores it). The ESF and Unified Log pipelines fail a rule that uses a field the taxonomy does not know, in a detection item, in a `fields:` list, in a correlation's group-by, and in a correlation's condition field. Known fields are not checked per category: a known field is accepted in any ESF category, even where those events never carry it (for example `TargetUser` in `privilege_change`, or `Success` in `process_creation`), and the query then simply never matches. `process.pid` and `process.parent.pid` values are emitted as strings, which matches keyword-mapped pid fields. Elastic Defend's long-typed pid fields are not supported in this release. `user.id` and similar id fields are keywords: plain values are converted to strings, and numeric comparisons (`gt`, `lt`, ...) on them fail instead of comparing a keyword with a number.
 
 The `ecs_macos_esf` pipeline in pySigma-backend-elasticsearch is a different, Elasticsearch-specific pipeline. `macos_esf_ecs` is the multi-backend layer: it scopes rules by ESF event name and category and is tested with the Lucene, EQL, ES|QL, Splunk and LogScale backends. A fixed `ecs_macos_esf` is being proposed upstream separately.
 
@@ -87,15 +87,17 @@ Besides the process fields (`Image`, `CommandLine`, `User`, `UserId`, ...), thes
 
 | Category | Sigma fields |
 |---|---|
-| `authentication` | `TargetUser`, `Success`, `AuthenticationType`, `InstigatorImage` (Open Directory logins only) |
-| `sudo` (events `sudo` and `su`) | `SourceUser`, `TargetUser`, `TargetUserId`, `TargetImage` (the program run), `Success`, `FailureReason` |
-| `screen_sharing` | `TargetUser`, `Success`, `SourceAddress`, `ViewerAppleID`, `ExistingSession` |
+| `authentication` | `TargetUser` and `InstigatorImage` (both Open Directory logins only), `Success`, `AuthenticationType` |
+| `sudo` (events `sudo` and `su`) | `SourceUser`, `TargetUser`, `TargetUserId`, `TargetImage` (sudo: the command run; su: the login shell), `Success`, `FailureReason` |
+| `screen_sharing` | `TargetUser` (the account used to authenticate; empty for VNC-password sessions), `Success`, `SourceAddress`, `ViewerAppleID`, `ExistingSession` |
 | `configuration_profile` | `ProfileIdentifier`, `ProfileDisplayName`, `ProfileInstallSource`, `ProfileScope`, `InstigatorImage` |
 | `xprotect` | `MalwareIdentifier`, `MalwareIncidentIdentifier`, `RemediationAction`, `TargetFilename`, `Success` (remediation only) |
 | `gatekeeper_override` | `TargetFilename`, `FileSha256`, `FileSigningID`, `FileTeamID` |
 | `user_account_change` | `TargetUser`, `TargetGroup`, `OdAttributeName`, `OdAttributeValue`, `Success`, `InstigatorImage` |
 
 `Success` is a boolean in Sigma: `true` converts to `event.outcome: success` and `false` to `event.outcome: failure`; any other value fails conversion. `setowner` and `setflags` in `file_attribute_change` also expose the target path as `TargetFilename`.
+
+For `od_group_add` and `od_group_remove`, `TargetUser` is the member value, which can be a user name, a user UUID or a group UUID. The member type (not mapped) says which.
 
 The `xprotect` and `gatekeeper_override` fields come from the member names in Apple's Endpoint Security headers; those events were not observed in captures, so treat them as unverified against live data.
 
