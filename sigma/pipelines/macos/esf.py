@@ -124,7 +124,7 @@ class FieldNameCheck(Transformation):
             fieldrefs = [fieldref] if isinstance(fieldref, str) else fieldref or []
             names += [name for name in [*(rule.group_by or []), *fieldrefs] if name not in aliases]
             # rules is None when an extended condition names the rules instead of a rules: key
-            refs = {ref.reference: ref.rule for ref in rule.referenced_rules or [] if hasattr(ref, "rule")}
+            refs = {ref.reference: ref.rule for ref in rule.referenced_rules if hasattr(ref, "rule")}
             names += [
                 field
                 for alias in rule.aliases
@@ -165,7 +165,7 @@ def macos_esf_ecs() -> ProcessingPipeline:
     Pipeline for macOS ESF rules targeting ECS-compliant backends.
 
     Converts product: macos rules (with no service or service: endpointsecurity)
-    into queries over Defend-shaped ECS documents.
+    into queries over ECS documents shaped like Elastic Defend's (pid values as strings).
     It emits process.pid and process.parent.pid values as strings, to match an index that maps them as
     keyword. Elastic Defend's long-typed pid fields are not supported in this release.
     """
