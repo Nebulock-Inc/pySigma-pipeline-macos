@@ -24,6 +24,8 @@ from sigma.types import SigmaCompareExpression
 
 from .taxonomy import ESF_CATEGORIES, ESF_FIELDS
 
+MACOS_SERVICES = ("endpointsecurity", "unifiedlog")  # besides none
+
 
 @dataclass
 class MacOSESFCondition(RuleProcessingCondition):
@@ -41,7 +43,7 @@ class MacOSESFCondition(RuleProcessingCondition):
             # As LogsourceCondition: a correlation matches when a resolved referenced rule does.
             return any(hasattr(ref, "rule") and self.match(ref.rule) for ref in rule.referenced_rules)
         ls = rule.logsource
-        # Rules of the other family pass through untouched: coreSigma stacks macos_esf_ecs with macos_ul_ecs.
+        # Rules of the other family pass through untouched: macos_esf_ecs can be stacked with macos_ul_ecs.
         return (
             ls.product == "macos"
             and ls.service in (None, "endpointsecurity")
@@ -85,25 +87,40 @@ class KeywordCompareFailure(DetectionItemTransformation):
             )
 
 
+class MacOSServiceCheck(Transformation):
+    """Fail a macOS rule whose service no pipeline knows: it would convert with no scope and no field check.
+
+    Case is left to each family's lowercase check.
+    """
+
+    def apply(self, rule) -> None:
+        ls = rule.logsource if isinstance(rule, SigmaRule) else None
+        if ls and (ls.product or "").lower() == "macos" and ls.service and ls.service.lower() not in MACOS_SERVICES:
+            raise SigmaTransformationError(
+                f"logsource service '{ls.service}' not supported for macOS (known: none, {', '.join(MACOS_SERVICES)})",
+                source=rule.source,
+            )
+
+
 class FieldNameCheck(Transformation):
     """Fail a rule's fields: list, or a correlation's group-by, alias fields or condition field, outside known names.
 
-    Known: the mapping's Sigma names and its targets, plus host.name, which pass through unchanged. Alias names pass
+    Known: the mapping's Sigma names and its targets, plus extra (host.name by default), which pass through unchanged. Alias names pass
     in group-by and as the condition field; alias fields are checked only for the referenced rules of family (in a
     mixed correlation, each pipeline checks its own source's rules). Each stacked pipeline checks in stacking order,
     so a name an earlier pipeline maps reaches a later pipeline's check mapped.
     """
 
-    def __init__(self, kind: str, mapping: dict[str, str], family: RuleProcessingCondition):
+    def __init__(self, kind: str, mapping: dict[str, str], family: RuleProcessingCondition, extra=("host.name",)):
         super().__init__()
         self.kind, self.family = kind, family
-        self.known = {*mapping, *mapping.values(), "host.name"}
+        self.known = {*mapping, *mapping.values(), *extra}
 
     def apply(self, rule) -> None:
         names = list(rule.fields)
         if isinstance(rule, SigmaCorrelationRule):
             aliases = {alias.alias for alias in rule.aliases}
-            fieldref = rule.condition.fieldref if rule.condition else None
+            fieldref = getattr(rule.condition, "fieldref", None)  # an extended (boolean) condition has none
             fieldrefs = [fieldref] if isinstance(fieldref, str) else fieldref or []
             names += [name for name in [*(rule.group_by or []), *fieldrefs] if name not in aliases]
             refs = {ref.reference: ref.rule for ref in rule.rules if hasattr(ref, "rule")}
@@ -148,8 +165,10 @@ def macos_esf_ecs() -> ProcessingPipeline:
 
     Converts product: macos rules (with no service or service: endpointsecurity)
     into queries over Defend-shaped ECS documents.
+    It emits process.pid and process.parent.pid values as strings, to match an index that maps them as
+    keyword; Elastic Defend maps them as long, so for Defend data use upstream ecs_macos_esf.
     """
-    items = []
+    items = [ProcessingItem(identifier="macos_esf_ecs_unknown_service", transformation=MacOSServiceCheck())]
 
     # Fail rules with known unsupported categories first
     unsupported_categories = ["network_connection", "dns_query"]

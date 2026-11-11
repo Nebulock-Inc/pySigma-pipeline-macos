@@ -98,6 +98,53 @@ correlation:
     pipelines["macos_falcon"]().apply(collection.rules[1])
 
 
+def test_falcon_keyword_fails_clearly():
+    rule = "title: T\nlogsource: {product: macos, category: process_creation}\ndetection:\n  k: [osascript]\n  condition: k\n"
+    with pytest.raises(
+        SigmaTransformationError, match="keyword search isn't supported for Falcon macOS process_creation"
+    ):
+        LogScaleBackend(processing_pipeline=pipelines["macos_falcon"]()).convert(SigmaCollection.from_yaml(rule))
+
+
+BASE = (
+    "title: Base\nname: base\nlogsource: {product: macos, category: process_creation}\n"
+    "detection:\n  selection: {Image|endswith: /osascript}\n  condition: selection\n"
+)
+
+
+@pytest.mark.parametrize(
+    "extra,error",
+    [
+        ("fields: [Image, CommandLine, ImageFileName]\n", None),
+        ("fields: [Image, User]\n", None),  # a rule's fields: aren't checked: LogScaleBackend ignores them
+        (
+            "---\ntitle: C\ncorrelation: {type: event_count, rules: [base], group-by: [Image], timespan: 1h,"
+            " condition: {gte: 3}}\nfields: [User]\n",
+            "User",
+        ),
+        (
+            "---\ntitle: C\ncorrelation: {type: event_count, rules: [base], group-by: [ParentImage, ParentBaseFileName],"
+            " timespan: 1h, condition: {gte: 3}}\n",
+            None,
+        ),
+        (
+            "---\ntitle: C\ncorrelation: {type: event_count, rules: [base], group-by: [host.name], timespan: 1h,"
+            " condition: {gte: 3}}\n",
+            "host.name",
+        ),  # no host field mapped
+    ],
+)
+def test_falcon_fields_and_group_by_checked(extra, error):
+    """A correlation's group-by and fields: take the mapping's Sigma names and Falcon targets only."""
+    collection = SigmaCollection.from_yaml(BASE + extra)
+    pipeline = pipelines["macos_falcon"]()
+    if error is None:
+        pipeline.apply(collection.rules[-1])
+    else:
+        with pytest.raises(SigmaTransformationError, match=f"Field not supported in Falcon macOS mapping: {error}"):
+            pipeline.apply(collection.rules[-1])
+
+
 def test_falcon_parent_image_exact_and_endswith():
     assert "ParentBaseFileName=/^Terminal$/i" in convert(
         PC, "        ParentImage: /System/Applications/Utilities/Terminal.app/Terminal"

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 
 from sigma.correlations import SigmaCorrelationRule
-from sigma.processing.conditions import IncludeFieldCondition, RuleProcessingCondition
+from sigma.processing.conditions import IncludeFieldCondition, IsSigmaCorrelationRuleCondition, RuleProcessingCondition
 from sigma.processing.transformations.base import DetectionItemTransformation
 from sigma.processing.pipeline import ProcessingItem, ProcessingPipeline
 from sigma.exceptions import SigmaTransformationError
@@ -18,7 +18,7 @@ from sigma.processing.transformations import (
 )
 from sigma.rule import SigmaRule
 
-from .esf import MacOSESFCondition, require_lowercase_logsource
+from .esf import FieldNameCheck, MacOSESFCondition, UnknownFieldCondition, require_lowercase_logsource
 
 FIELDS = {"Image": "ImageFileName", "CommandLine": "CommandLine", "ParentImage": "ParentBaseFileName"}
 
@@ -39,6 +39,16 @@ class FalconLowercaseLogsourceCheck(Transformation):
     def apply(self, rule) -> None:
         if isinstance(rule, SigmaRule) and (rule.logsource.product or "").lower() == "macos":
             require_lowercase_logsource(rule, "Falcon macOS")
+
+
+class FalconKeywordGuard(DetectionItemTransformation):
+    """Fail keyword items clearly instead of as an unknown field."""
+
+    def apply_detection_item(self, detection_item) -> None:
+        if detection_item.field is None:
+            raise SigmaTransformationError(
+                "keyword search isn't supported for Falcon macOS process_creation", source=detection_item.source
+            )
 
 
 class FalconParentImageGuard(DetectionItemTransformation):
@@ -83,11 +93,23 @@ def macos_falcon() -> ProcessingPipeline:
                 rule_conditions=[FalconUnsupportedMacOSCondition()],
             ),
             ProcessingItem(
+                identifier="macos_falcon_keyword_failure",
+                transformation=FalconKeywordGuard(),
+                rule_conditions=scope(),
+            ),
+            ProcessingItem(
                 identifier="macos_falcon_unmapped_field_failure",
                 transformation=DetectionItemFailureTransformation("Field not supported on Falcon macOS telemetry"),
                 rule_conditions=scope(),
-                field_name_conditions=[IncludeFieldCondition(list(FIELDS))],
-                field_name_condition_negation=True,
+                field_name_conditions=[UnknownFieldCondition(list(FIELDS))],
+            ),
+            ProcessingItem(
+                identifier="macos_falcon_field_name_check",
+                # no host field is mapped, so nothing passes besides the mapping's names
+                transformation=FieldNameCheck("Falcon macOS", FIELDS, scope()[0], extra=()),
+                # shortcut: correlations only; LogScaleBackend 3.0.0 ignores a rule's fields: (12 shipped rules list
+                # ProcessId, ParentProcessId or User), check them too if a Falcon backend starts emitting fields:
+                rule_conditions=[*scope(), IsSigmaCorrelationRuleCondition()],
             ),
             ProcessingItem(
                 identifier="macos_falcon_parent_guard",

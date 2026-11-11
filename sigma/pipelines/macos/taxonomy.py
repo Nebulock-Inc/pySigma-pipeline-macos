@@ -32,7 +32,12 @@ class UlField:
 
 
 ESF_CATEGORIES: dict[str, EsfCategory] = {
-    "process_creation": EsfCategory(events=("exec",), ecs={"event.category": "process", "event.type": "start"}),
+    # Defend writes forks as process + start too, so the scope also takes event.action exec
+    "process_creation": EsfCategory(
+        events=("exec",),
+        ecs={"event.category": "process", "event.type": "start"},
+        scope={"event.category": "process", "event.type": "start", "event.action": "exec"},
+    ),
     # Creates plus the rename destination (TargetFilename is the new path, as in Defend's rename). Creates by
     # event.type, which the data source and Defend share (their actions differ: create, creation). Renames, which have
     # no event.type here, take file_rename's stamp: the data source stamps an event with the last category listing it,

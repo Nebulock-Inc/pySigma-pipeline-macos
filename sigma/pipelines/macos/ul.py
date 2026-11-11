@@ -17,7 +17,13 @@ from sigma.processing.transformations import (
 )
 from sigma.rule import SigmaRule
 
-from .esf import FieldNameCheck, KeywordCompareFailure, UnknownFieldCondition, require_lowercase_logsource
+from .esf import (
+    FieldNameCheck,
+    KeywordCompareFailure,
+    MacOSServiceCheck,
+    UnknownFieldCondition,
+    require_lowercase_logsource,
+)
 from .taxonomy import UL_CATEGORIES, UL_FIELDS, UL_RAW_ONLY_FIELDS
 
 # UL_CATEGORIES modifier spellings as Sigma field suffixes (see the taxonomy header).
@@ -40,7 +46,7 @@ class MacOSULCondition(RuleProcessingCondition):
         if isinstance(rule, SigmaCorrelationRule):
             return any(hasattr(ref, "rule") and self.match(ref.rule) for ref in rule.referenced_rules)
         ls = rule.logsource
-        # Rules of the other family pass through untouched: coreSigma stacks macos_ul_ecs with macos_esf_ecs.
+        # Rules of the other family pass through untouched: macos_ul_ecs can be stacked with macos_esf_ecs.
         if ls.product != "macos" or ls.service != "unifiedlog":
             return False
         if self.unknown:
@@ -62,6 +68,7 @@ class MacOSULCaseCheckTransformation(Transformation):
 def _ul_pipeline(name: str, column: str) -> ProcessingPipeline:
     """Category predicates are in native names; the final mapping takes UL_FIELDS.<column>."""
     items = [
+        ProcessingItem(identifier=f"{name}_unknown_service", transformation=MacOSServiceCheck()),
         ProcessingItem(identifier=f"{name}_lowercase_logsource", transformation=MacOSULCaseCheckTransformation()),
         ProcessingItem(
             identifier=f"{name}_fail_unknown_category",

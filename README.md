@@ -10,7 +10,7 @@ Rules select macOS telemetry through the logsource:
 * `product: macos` with a `category` such as `process_creation` (optionally `service: endpointsecurity`) is Endpoint Security Framework (ESF) data.
 * `product: macos` with `service: unifiedlog` is Unified Log data. The category narrows which log lines are in scope (for example `sudo`, `tcc`, `gatekeeper`, `mdm`).
 
-Logsource values must be lowercase. A macOS rule with a wrong-case value fails conversion with a clear error instead of being silently skipped.
+`process_creation` is scoped to the `exec` event (`event.action: exec`), so it does not match other process events. Logsource values must be lowercase, and a macOS rule whose `service` is anything other than `endpointsecurity` or `unifiedlog` (a misspelling such as `unifiedlogs`) fails conversion instead of being converted unscoped. A macOS rule with a wrong-case value fails conversion with a clear error instead of being silently skipped.
 
 ## Install
 
@@ -34,7 +34,7 @@ With sigma-cli:
 
 Events are expected to have the field names the taxonomy defines. This package does not collect telemetry.
 
-Field checks: the ESF and Unified Log pipelines fail a rule that uses a field the taxonomy does not know, in a detection item, in a `fields:` list, in a correlation's group-by, and in a correlation's condition field, instead of producing a query that never matches. `user.id` and similar id fields are keywords: plain values are converted to strings, and numeric comparisons (`gt`, `lt`, ...) on them fail instead of comparing a keyword with a number.
+Field checks: `macos_falcon` also fails unknown fields in correlation group-by, aliases and condition fields, and in `fields:` lists of correlated rules (a base rule's own `fields:` is not checked, because LogScale ignores it). The ESF and Unified Log pipelines fail a rule that uses a field the taxonomy does not know, in a detection item, in a `fields:` list, in a correlation's group-by, and in a correlation's condition field, instead of producing a query that never matches. `process.pid` and `process.parent.pid` values are emitted as strings, matching an index that maps them as keyword. Elastic Defend maps them as long, so for Elastic Defend data use the upstream `ecs_macos_esf` pipeline instead. `user.id` and similar id fields are keywords: plain values are converted to strings, and numeric comparisons (`gt`, `lt`, ...) on them fail instead of comparing a keyword with a number.
 
 The `ecs_macos_esf` pipeline in pySigma-backend-elasticsearch is a different, Elasticsearch-specific pipeline. `macos_esf_ecs` is the multi-backend layer: it scopes rules by ESF event name and category and is tested with the Lucene, EQL, ES|QL, Splunk and LogScale backends. A fixed `ecs_macos_esf` is being proposed upstream separately.
 
@@ -61,7 +61,7 @@ detection:
 print(LuceneBackend(processing_pipeline=pipelines["macos_esf_ecs"]()).convert(rule)[0])
 ```
 
-    (event.category:process AND event.type:start) AND (process.executable:*\/curl AND process.command_line:*\/tmp\/*)
+    (event.category:process AND event.type:start AND event.action:exec) AND (process.executable:*\/curl AND process.command_line:*\/tmp\/*)
 
 The same rule with `macos_falcon` and the LogScale backend:
 
@@ -81,7 +81,7 @@ sigma-cli:
 
 ## Limitations
 
-* **Falcon is `process_creation` only.** `macos_falcon` converts `Image`, `CommandLine` and `ParentImage` for `process_creation` rules. Every other macOS category, and all `unifiedlog` rules, fail with "not supported on Falcon macOS telemetry". Fields without a Falcon equivalent (for example `SigningID`) also fail rather than being dropped. `ParentImage` is matched on the parent's basename only (Falcon's `ParentBaseFileName`), so only exact and `endswith` values with a non-empty basename are accepted; `contains`, `startswith` and `re` fail.
+* **Falcon is `process_creation` only, with no keyword search.** Keyword (field-less) detection items fail with a clear message. `macos_falcon` converts `Image`, `CommandLine` and `ParentImage` for `process_creation` rules. Every other macOS category, and all `unifiedlog` rules, fail with "not supported on Falcon macOS telemetry". Fields without a Falcon equivalent (for example `SigningID`) also fail rather than being dropped. `ParentImage` is matched on the parent's basename only (Falcon's `ParentBaseFileName`), so only exact and `endswith` values with a non-empty basename are accepted; `contains`, `startswith` and `re` fail.
 * **No Kusto pipeline.** Microsoft Sentinel and Defender for Endpoint (Kusto) have no macOS tables for ESF or Unified Log data. Defender for Endpoint's `DeviceProcessEvents` carries macOS `process_creation`, and the stock `microsoft_xdr_pipeline` from pySigma-backend-kusto already converts those rules (covered by a test here); this package adds nothing for Kusto.
 * **Rename coverage depends on the data source.** `file_event` matches creates by `event.type` and renames by `event.action: rename`. Whether a rename reaches your index with those values (and with the destination path in `TargetFilename`) depends on the collector or integration that produced the documents; check your data before relying on rename rules.
 * **`eventType` is raw-only.** The native Unified Log key `eventType` works with `macos_ul_raw`; `macos_ul_ecs` fails it because ECS Unified Log documents do not carry it. Unknown fields fail in both Unified Log pipelines.

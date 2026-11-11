@@ -36,7 +36,10 @@ detection:
 """
     backend = EqlBackend(processing_pipeline=pipelines["macos_esf_ecs"]())
     result = backend.convert(SigmaCollection.from_yaml(rule))[0]
-    assert result == 'any where (event.category:"process" and event.type:"start") and process.executable:"*/curl"'
+    assert (
+        result
+        == 'any where (event.category:"process" and event.type:"start" and event.action:"exec") and process.executable:"*/curl"'
+    )
 
 
 def test_file_event_is_create_and_rename():
@@ -140,7 +143,7 @@ detection:
     # Test Lucene
     lucene_backend = LuceneBackend(processing_pipeline=pipelines["macos_esf_ecs"]())
     lucene_result = lucene_backend.convert(SigmaCollection.from_yaml(rule))[0]
-    assert lucene_result == "(event.category:process AND event.type:start) AND user.id:0"
+    assert lucene_result == "(event.category:process AND event.type:start AND event.action:exec) AND user.id:0"
 
     # Test ES|QL - contains check for string conversion
     esql_backend = ESQLBackend(processing_pipeline=pipelines["macos_esf_ecs"]())
@@ -250,7 +253,7 @@ detection:
 """
     backend = LuceneBackend(processing_pipeline=pipelines["macos_esf_ecs"]())
     assert backend.convert(SigmaCollection.from_yaml(rule)) == [
-        "(event.category:process AND event.type:start) AND *evil*"
+        "(event.category:process AND event.type:start AND event.action:exec) AND *evil*"
     ]
 
 
@@ -535,6 +538,37 @@ detection:
         backend.convert(SigmaCollection.from_yaml(rule))
 
 
+@pytest.mark.parametrize("pipeline", ["macos_esf_ecs", "macos_ul_ecs", "macos_ul_raw"])
+@pytest.mark.parametrize("service", ["endpointsecurty", "unifiedlogs", "sysmon"])
+def test_unknown_macos_service_fails(pipeline, service):
+    """A macOS service no pipeline knows would get no scope and no field check: it fails, naming the known ones."""
+    rule = f"""
+title: t
+logsource: {{product: macos, service: {service}, category: process_creation}}
+detection:
+    selection:
+        Image: /x
+    condition: selection
+"""
+    with pytest.raises(
+        SigmaTransformationError,
+        match=f"logsource service '{service}' not supported for macOS .known: none, endpointsecurity, unifiedlog",
+    ):
+        LuceneBackend(processing_pipeline=pipelines[pipeline]()).convert(SigmaCollection.from_yaml(rule))
+
+
+def test_extended_correlation_condition():
+    """A temporal correlation's boolean condition (no field) doesn't crash the field check."""
+    rules = _correlation(
+        "  type: temporal\n  rules: [macos_curl, ul_tcc]\n  group-by: [host.name]\n  timespan: 5m\n"
+        "  condition: macos_curl and ul_tcc",
+        CURL,
+        UL_TCC,
+    )
+    collection = SigmaCollection.from_yaml(rules)
+    (pipelines["macos_esf_ecs"]() + pipelines["macos_ul_ecs"]()).apply(collection.rules[-1])
+
+
 def test_service_endpointsecurity_mixedcase_unknown_category():
     """A rule with service: EndpointSecurity (mixed case) and unknown category fails with category error."""
     rule = """
@@ -559,8 +593,7 @@ detection:
     [
         ("unifiedlog", "sudo"),  # category shared with ESF_CATEGORIES
         ("unifiedlog", "xprotect"),  # category shared with ESF_CATEGORIES
-        ("UnifiedLog", "process_creation"),
-        ("foo", "process_creation"),
+        ("UnifiedLog", "process_creation"),  # the UL pipelines fail its case
     ],
 )
 def test_non_esf_service_untouched(service, category):
@@ -609,6 +642,6 @@ correlation:
 """
     backend = SplunkBackend(processing_pipeline=pipelines["macos_esf_ecs"]())
     assert backend.convert(SigmaCollection.from_yaml(rules)) == [
-        'event.category="process" event.type="start" process.executable="*/curl"\n\n'
+        'event.category="process" event.type="start" event.action="exec" process.executable="*/curl"\n\n'
         "| bin _time span=5m\n| stats count as event_count by _time user.name\n\n| search event_count >= 10"
     ]
