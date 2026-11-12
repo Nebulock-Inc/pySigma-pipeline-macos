@@ -67,7 +67,7 @@ print(LuceneBackend(processing_pipeline=pipelines["macos_esf_ecs"]()).convert(ru
 
 The same rule with `macos_falcon` and the LogScale backend:
 
-    event_simpleName=/^(ProcessRollup2|SyntheticProcessRollup2)$/ event_platform=/^Mac$/i ImageFileName=/\/curl$/i CommandLine=/\/tmp\//i
+    #event_simpleName=/^(ProcessRollup2|SyntheticProcessRollup2)$/ event_platform=/^Mac$/i ImageFileName=/\/curl$/i CommandLine=/\/tmp\//i
 
 Unified Log, with `service: unifiedlog`, `category: sudo` and `eventMessage|contains: COMMAND=`:
 

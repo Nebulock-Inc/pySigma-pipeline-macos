@@ -32,7 +32,7 @@ PC = "    product: macos\n    category: process_creation"
 
 def test_falcon_process_creation():
     out = convert(PC, "        Image|endswith: /osascript")
-    assert r"event_simpleName=/^(ProcessRollup2|SyntheticProcessRollup2)$/" in out
+    assert r"#event_simpleName=/^(ProcessRollup2|SyntheticProcessRollup2)$/" in out
     assert r"ImageFileName=/\/osascript$/i" in out
     assert "event_platform=/^Mac$/i" in out
 

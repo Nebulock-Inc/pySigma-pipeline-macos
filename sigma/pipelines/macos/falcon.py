@@ -127,7 +127,7 @@ def macos_falcon() -> ProcessingPipeline:
             ProcessingItem(
                 identifier="macos_falcon_scope",
                 transformation=AddConditionTransformation(
-                    {"event_simpleName|re": "^(ProcessRollup2|SyntheticProcessRollup2)$", "event_platform": "Mac"}
+                    {"#event_simpleName|re": "^(ProcessRollup2|SyntheticProcessRollup2)$", "event_platform": "Mac"}  # a tag in LogScale: event_simpleName (no #) matches nothing
                 ),
                 rule_conditions=scope(),
             ),
