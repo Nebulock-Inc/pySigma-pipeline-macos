@@ -1,4 +1,4 @@
-"""macOS pipeline for CrowdStrike Falcon LogScale (FDR telemetry)."""
+"""macOS pipeline for CrowdStrike Falcon LogScale (not FDR data outside LogScale, which has no #event_simpleName tag)."""
 
 from dataclasses import dataclass
 
@@ -75,7 +75,7 @@ class FalconParentImageGuard(DetectionItemTransformation):
 
 
 def macos_falcon() -> ProcessingPipeline:
-    """Pipeline for macOS process_creation rules on Falcon LogScale (FDR)."""
+    """Pipeline for macOS process_creation rules on Falcon LogScale."""
 
     def scope():
         return [MacOSESFCondition("process_creation")]
