@@ -194,3 +194,41 @@ def test_falcon_parent_image_unsupported(selection, needle):
 
 def test_falcon_parent_image_partial_wildcard_converts():
     assert "ParentBaseFileName=" in convert(PC, "        ParentImage: '/usr/bin/z*'")
+
+
+def _negated(filter_):
+    rule = f"""
+title: T
+logsource:
+{PC}
+detection:
+    sel:
+        Image|endswith: /curl
+    filter:
+{filter_}
+    condition: sel and not filter
+"""
+    return LogScaleBackend(processing_pipeline=pipelines["macos_falcon"]()).convert(SigmaCollection.from_yaml(rule))[0]
+
+
+@pytest.mark.parametrize(
+    "filter_",
+    [
+        "        ParentImage: /usr/local/jamf/bin/jamf",
+        "        ParentImage|endswith: /usr/libexec/xpcproxy",
+        "        ParentImage: jamf",
+        "        ParentImage|endswith:\n            - /bin/zsh\n            - xpcproxy",
+    ],
+)
+def test_falcon_parent_image_path_under_not_rejected(filter_):
+    with pytest.raises(SigmaTransformationError, match="under 'not'"):
+        _negated(filter_)
+
+
+@pytest.mark.parametrize("value", ["jamf", "/jamf", "*/jamf"])
+def test_falcon_parent_image_name_under_not_converts(value):
+    assert "not ParentBaseFileName=" in _negated(f"        ParentImage|endswith: '{value}'")
+
+
+def test_falcon_parent_image_path_positive_still_converts():
+    assert "ParentBaseFileName=/^jamf$/i" in convert(PC, "        ParentImage: /usr/local/jamf/bin/jamf")

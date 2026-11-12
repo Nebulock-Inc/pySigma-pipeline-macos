@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from sigma.conditions import ConditionFieldEqualsValueExpression, ConditionNOT
 from sigma.correlations import SigmaCorrelationRule
 from sigma.processing.conditions import IncludeFieldCondition, IsSigmaCorrelationRuleCondition, RuleProcessingCondition
 from sigma.processing.transformations.base import DetectionItemTransformation
@@ -74,6 +75,50 @@ class FalconParentImageGuard(DetectionItemTransformation):
                 )
 
 
+class FalconParentImageNegationGuard(Transformation):
+    """Reject a ParentImage item under a NOT unless it names only a file: endswith `name`, `/name` or `*/name`.
+
+    Falcon keeps only the parent's basename, so stripping a directory widens the match. In a
+    positive selection that adds matches; under a NOT it widens the exclusion, so `not ParentImage:
+    /usr/local/jamf/bin/jamf` would also exclude an attacker's `/tmp/jamf`.
+    """
+
+    def apply(self, rule) -> None:
+        if not isinstance(rule, SigmaRule):
+            return
+        origin = {}  # value object -> its detection item; condition leaves link to items only through the value
+
+        def collect(detection):
+            for item in detection.detection_items:
+                if hasattr(item, "detection_items"):
+                    collect(item)
+                else:
+                    for value in item.value:
+                        origin[id(value)] = item
+
+        for detection in rule.detection.detections.values():
+            collect(detection)
+        for condition in rule.detection.parsed_condition:
+            self._walk(condition.parsed, False, origin)
+
+    def _walk(self, node, negated, origin) -> None:
+        if isinstance(node, ConditionFieldEqualsValueExpression):
+            item = origin.get(id(node.value))
+            if negated and item is not None and item.field == "ParentImage":
+                value = str(node.value)
+                if SigmaEndswithModifier not in item.modifiers or value.rsplit("/", 1)[0] not in ("", "*", value):
+                    raise SigmaTransformationError(
+                        f"ParentImage '{value}' under 'not' isn't supported on Falcon macOS telemetry: only the "
+                        "parent's file name is recorded, so the exclusion would cover every parent with that name; "
+                        "use ParentImage|endswith with just the file name if that is what you mean",
+                        source=item.source,
+                    )
+            return
+        negated = negated or isinstance(node, ConditionNOT)
+        for arg in getattr(node, "args", []):
+            self._walk(arg, negated, origin)
+
+
 def macos_falcon() -> ProcessingPipeline:
     """Pipeline for macOS process_creation rules on Falcon LogScale."""
 
@@ -110,6 +155,11 @@ def macos_falcon() -> ProcessingPipeline:
                 # shortcut: correlations only; LogScaleBackend 3.0.0 ignores a rule's fields: (12 shipped rules list
                 # ProcessId, ParentProcessId or User), check them too if a Falcon backend starts emitting fields:
                 rule_conditions=[*scope(), IsSigmaCorrelationRuleCondition()],
+            ),
+            ProcessingItem(
+                identifier="macos_falcon_parent_negation_guard",
+                transformation=FalconParentImageNegationGuard(),
+                rule_conditions=scope(),
             ),
             ProcessingItem(
                 identifier="macos_falcon_parent_guard",
