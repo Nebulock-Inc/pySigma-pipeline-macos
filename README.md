@@ -113,7 +113,7 @@ The `xprotect` and `gatekeeper_override` fields come from the member names in Ap
 * **Unified Log `launchd` scoping** matches `processImagePath = /sbin/launchd` (exact path); the pipeline adds no other condition for that category.
 * **ESF only has a `macos_esf_ecs` pipeline.** There is no raw ESF pipeline; raw `eslogger` JSON is not mapped.
 * **LogScale has no correlation support in pySigma-backend-crowdstrike 3.0.0.** That release does not convert correlation rules, so there the Falcon correlation field checks only matter for other backends. Later releases may add correlation support.
-* Only the backends exercised by the tests are known to work: Elasticsearch (Lucene, EQL, ES|QL), Splunk and CrowdStrike LogScale. <!-- TASK16: link the support matrix here -->
+* Only the backends exercised by the tests are known to work: Elasticsearch (Lucene, EQL, ES|QL), Splunk and CrowdStrike LogScale. coreSigma's [support matrix](https://github.com/Nebulock-Inc/macos-coresigma/blob/v2.0.0/docs/SUPPORT_MATRIX.md) shows how each of its 69 rules converts and fires on each target, from replays of macOS test-host captures.
 
 ## Tested versions
 
